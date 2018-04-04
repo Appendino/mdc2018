@@ -1,24 +1,27 @@
 # Lib utilizada para filtrar as datas no data.frame
-# install.packages("dplyr")
+#install.packages("dplyr")
 library(dplyr)
-# Lib para geração de gráficos
+# Lib para gera??o de gr?ficos
 library(ggplot2)
+# Lib Usada para o calculo de similaridade de cosseno
+#install.packages("lsa")
+library(lsa)
 
-# Carregando os dados, utilizando mesma configuração da tarefa 4
+# Carregando os dados, utilizando mesma configura??o da tarefa 4
 names <- c("Horario", "Temperatura", "Vento", "Umidade", "Sensacao")
-cepagri <- read.csv("cepagri.csv", 
+cepagri <- read.csv("/home/pedro/Documents/CursoMineracao/RecuperacaoInformacao/mdc2018/cepagri.csv", 
                     header = FALSE, sep = ";", col.names = names)
 
 # Carregando os dados do arquivo de consulta em data frame
-query <- read.csv("query.csv", 
-                    header = TRUE, sep = ";")
+query <- read.csv("/home/pedro/Documents/CursoMineracao/RecuperacaoInformacao/mdc2018/query.csv", 
+                    header = TRUE, sep = ",")
 
 # Convertando a Horario para POSIXlt
 class(cepagri$Horario)
 cepagri$Horario <- strptime(cepagri$Horario, '%d/%m/%Y-%H:%M')
 
-# Filtrando os dados de 2015 a 2017, pela documentação do R o ano é referente a 1900, 
-# então o filtro será de 115 a 117
+# Filtrando os dados de 2015 a 2017, pela documenta??o do R o ano ? referente a 1900, 
+# ent?o o filtro ser? de 115 a 117
 filtro_analises <- unclass(cepagri$Horario$year) >= 115 & unclass(cepagri$Horario$year) <= 117
 cepagri_filtrado <- data.frame(Horario = cepagri$Horario[filtro_analises],
                                Temperatura = cepagri$Temperatura[filtro_analises],
@@ -59,8 +62,8 @@ cepagri_work <- data.frame(Horario = cepagri_filtrado$Horario[filtro_cons],
                            Sensacao = cepagri_filtrado$Sensacao[filtro_cons])
 
 
-# O data.frame utilizado para analise será o cepagri_work
-# Analisando a precisão do e do equipamento 
+# O data.frame utilizado para analise ser? o cepagri_work
+# Analisando a precis?o do e do equipamento 
 total_days_in_frame <- length(unique(format(cepagri_work$Horario, '%d/%m/%Y')))
 total_days_period <- as.Date("01/01/2018","%d/%m/%Y") - as.Date("01/01/2015","%d/%m/%Y")
 # Tota de dias coletados
@@ -71,7 +74,7 @@ days_in_period <- format(days_in_period, "%d/%m/%Y")
 days_in_frame <- unique(unique(format(cepagri_work$Horario, "%d/%m/%Y")))
 days_in_period[!is.element(days_in_period, days_in_frame)]
 
-# Criando um novo data.frame com as informações consolidadas por dia:
+# Criando um novo data.frame com as informa??es consolidadas por dia:
 day_vector <- c()
 max_temp_day <- c()
 min_temp_day <- c()
@@ -154,56 +157,49 @@ cepagri_day_summary <- data.frame(Dia=strptime(day_vector, "%Y%m%d"),
 
 
 
-# Implemtenção de consulta usando a distance L2 e Similiridade de cosseno
-df_dia_consulta <- filter(cepagri_day_summary, format(Dia, "%Y%m%d") == "20150130" )
-vetor_caracterisca <- c(df_dia_consulta$MaxTem, df_dia_consulta$MinTemp, df_dia_consulta$MedTemp,
+# Implemten??o de consulta usando a distance L2 e Similiridade de cosseno
+# Matrizes utilizadas para o calculo da media da precisao e da revocacao
+m_precisao <- matrix(nrow = 20, ncol = 100)
+m_revocacao <- matrix(nrow = 20, ncol = 100)
+pos_matrizes <- 1
+for (data_consulta in query$x){
+   print(data_consulta[1])
+   df_dia_consulta <- filter(cepagri_day_summary, format(Dia, "%Y-%m-%d") ==  data_consulta)
+   vetor_caracterisca <- c(df_dia_consulta$MaxTem, df_dia_consulta$MinTemp, df_dia_consulta$MedTemp,
                         df_dia_consulta$MaxSensacao, df_dia_consulta$MinSensacao, df_dia_consulta$MedSensacao,
                         df_dia_consulta$MaxUmidade, df_dia_consulta$MinUmidade, df_dia_consulta$MedUmidade)
 
-dia <- c()
-cos_sim <- c()
-dist_l2 <- c()
-for(i in 1:nrow(cepagri_day_summary)){
-  linha <- cepagri_day_summary[i,]
-  vc <- c(linha$MaxTem, linha$MinTemp, linha$MedTemp, linha$MaxSensacao, 
+   dia <- c()
+   cos_sim <- c()
+   dist_l2 <- c()
+   for(i in 1:nrow(cepagri_day_summary)){
+      linha <- cepagri_day_summary[i,]
+      vc <- c(linha$MaxTem, linha$MinTemp, linha$MedTemp, linha$MaxSensacao, 
           linha$MinSensacao, linha$MedSensacao, linha$MaxUmidade, linha$MinUmidade,
           linha$MedUmidade)
-  cos_sim[i] <- cosine(vetor_caracterisca, vc)[1]
-  dist_l2[i] <- dist(rbind(vetor_caracterisca, vc))
-  dia[i] <- as.Date(linha$Dia)
+      cos_sim[i] <- cosine(vetor_caracterisca, vc)[1]
+      dist_l2[i] <- dist(rbind(vetor_caracterisca, vc))
+      dia[i] <- as.Date(linha$Dia)
+   }
+
+   datas_ret_consulta <- as.Date(dia[order(dist_l2)], origin = "1970-01-01")
+   posicao_relevantes <- which(datas_ret_consulta <= as.Date(df_dia_consulta$Dia) +7 &
+                           datas_ret_consulta <= as.Date(df_dia_consulta$Dia) - 7)
+   posicao_relevantes <- posicao_relevantes[posicao_relevantes < 101]
+   print(length(posicao_relevantes))
+   total_relevantes <- length(posicao_relevantes)
+   for(k in seq(5, 100, 5)){
+     relevantes <- length(posicao_relevantes[posicao_relevantes <= k])
+     m_precisao[pos_matrizes] <- relevantes/k
+     if(total_relevantes < 1)
+       m_revocacao[pos_matrizes] <- 0
+     else
+       m_revocacao[pos_matrizes] <- relevantes/length(posicao_relevantes)
+     pos_matrizes <- pos_matrizes + 1
+   }
 }
 
-as.Date(dia[order(cos_sim, decreasing = T)], origin = "1970-01-01") > df_dia_consulta$Dia + 7
-as.Date(dia[order(dist_l2)], origin = "1970-01-01")[1:10]
-
-dia[order(dist_l2)]
-datas_ret_consulta <- as.Date(dia[order(dist_l2)], origin = "1970-01-01")
-posicao_relevantes <- which(datas_ret_consulta < as.Date(df_dia_consulta$Dia) +7 &
-                           datas_ret_consulta < as.Date(df_dia_consulta$Dia) - 7)
-posicao_relevantes <- posicao_relevantes[posicao_relevantes < 101]
-
-count_loop <- 1
-precisao <- c()
-revocacao <- c()
-
-for (i in posicao_relevantes){
-  precisao[count_loop] <- count_loop/i
-  revocacao[count_loop] <- count_loop/length(posicao_relevantes)
-  count_loop <- count_loop + 1
-}
-
-1/11
-2/37
-3/42
-precisao
-revocacao
-library(ggplot2)
-ggplot(data.frame(precisao, revocacao), aes(x=revocacao, y=precisao)) + geom_point() + geom_line()
-  
-  
-filter(cepagri_day_summary, format(Dia, "%Y%m%d") == "20150130")
-filter(cepagri_day_summary, format(Dia, "%Y%m%d") == "20160215")
 
 
 
-df_dia_consulta$Dia + 7
+
